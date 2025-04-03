@@ -71,9 +71,11 @@ runs:
   - name: Build Code
     shell: bash
     run: |
-        echo "Setting up environment variables..."
-        echo "${{ inputs.env_vars }}"
-        cat dart_defines.json
+        if [[ -n '${{ inputs.env_vars }}' && '${{ inputs.env_vars }}' != '{}' ]]; then
+          echo "Generating dart json file"
+          echo '${{ inputs.env_vars }}' | jq '.' > dart_defines.json
+          cat dart_defines.json
+        fi
         cd ${{ inputs.repo_name }}
 
         flutter build apk --obfuscate --split-debug-info=build/app/outputs/symbols $( [[ -f dart_defines.json ]] && echo "--dart-define-from-file=dart_defines.json" )
