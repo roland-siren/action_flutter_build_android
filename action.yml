@@ -71,6 +71,8 @@ runs:
   - name: Build Code
     shell: bash
     run: |
+        ls -la ~/.git
+        git config --global --add safe.directory /usr/local/flutter
         if [[ -n '${{ inputs.env_vars }}' && '${{ inputs.env_vars }}' != '{}' ]]; then
           echo "Generating dart json file"
           echo '${{ inputs.env_vars }}' | jq '.' > dart_defines.json
