@@ -1,0 +1,125 @@
+name: Android Flutter Build
+description: Android Flutter Build
+inputs:
+  repo_owner:
+    required: false
+    default: ${{ github.repository_owner}}
+    description: Repository owner
+  repo_name:
+    required: false
+    default: ${{ github.event.repository.name}}
+    description: Repository name
+  release_version:
+    required: true
+    description: Release version
+  release_tag:
+    required: false
+    description: Release tag
+  token:
+    required: false
+    description: Git token if needed
+    default: ${{ github.token}}
+  env_vars:
+    description: "JSON string of environment variables"
+    required: false
+    default: "{}"
+  #keystore signing section
+  playstore_upload_key:
+    required: false
+    description: JKS file, stored as base64
+    default: ""
+  playstore_keystore_key_alias:
+    required: false
+    description: Alias of the JKS, set on creation.
+    default: ""
+  playstore_keystore_store_password:
+    required: false
+    description: Keystore password set on creation.
+    default: ""
+  playstore_keystore_key_password:
+    required: false
+    description: Usually the same as store_password if not set.
+    default: ""
+runs:
+  using: "composite"
+  steps:
+  - name: Clean Workspace
+    shell: bash
+    run: |
+        rm -Rf ${{ inputs.repo_name }}
+
+  - name: Checkout Code
+    uses: actions/checkout@v4
+    with:
+      repository: ${{ inputs.repo_owner }}/${{ inputs.repo_name }}
+      token: ${{ inputs.token }}
+      ref: ${{ github.ref }}
+      path: ${{ inputs.repo_name }}
+      submodules: recursive
+
+  - name: Configure Keystore for Android signing
+    if: ${{ inputs.playstore_upload_key != '' }}
+    shell: bash
+    run: |
+        echo "${{ inputs.playstore_upload_key }}" | base64 --decode > app/keystore.jks
+        echo RELEASE_STORE_FILE=keystore.jks >> keystore.properties
+        echo RELEASE_KEY_ALIAS=${{ inputs.playstore_keystore_key_alias }} >> keystore.properties
+        echo RELEASE_STORE_PASSWORD=${{ inputs.playstore_keystore_store_password }} >> keystore.properties
+        echo RELEASE_KEY_PASSWORD=${{ inputs.playstore_keystore_key_password }} >> keystore.properties
+    working-directory: ${{ env.REPO_NAME }}
+
+  - name: Build Code
+    shell: bash
+    run: |
+        echo "Setting up environment variables..."
+        echo "${{ inputs.env_vars }}"
+        cat dart_defines.json
+        cd ${{ inputs.repo_name }}
+
+        flutter build apk --obfuscate --split-debug-info=build/app/outputs/symbols $( [[ -f dart_defines.json ]] && echo "--dart-define-from-file=dart_defines.json" )
+        mv build/app/outputs/flutter-apk/app-release.apk  app/build/outputs/apk/app.apk 
+        
+
+  - name: Delete Previous Remote Release If Found
+    uses: dev-drprasad/delete-tag-and-release@v0.2.1
+    with:
+      delete_release: true
+      tag_name: ${{ inputs.repo_name }}-${{ inputs.release_tag }}
+      repo: ${{ inputs.repo_owner }}/${{ inputs.repo_name }}
+    env:
+      GITHUB_TOKEN: ${{ inputs.token }}
+
+  - name: Create New Remote Release
+    id: create_release
+    uses: ncipollo/release-action@v1.12.0
+    with:
+      token: ${{ inputs.token }}
+      owner: ${{ inputs.repo_owner }}
+      repo: ${{ inputs.repo_name }}
+      tag: ${{ inputs.repo_name }}-${{ inputs.release_tag }}
+      draft: true
+      prerelease: false
+
+  - name: Upload Release Assets
+    uses: dream-encode/upload-release-asset-node16@v2.0.3
+    if: ${{ inputs.playstore_upload_key }} == ''
+    env:
+      GITHUB_TOKEN: ${{ inputs.token }}
+    with:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      asset_path: ${{ inputs.repo_name }}/app/build/outputs/apk/app.apk 
+      asset_name: ${{ inputs.repo_name }}.apk
+      asset_content_type: application/vnd.android.package-archive
+  
+  - name: Publish Release
+    uses: StuYarrow/publish-release@v1.1.2
+    env:
+      GITHUB_TOKEN: ${{ inputs.token }}
+    with:
+      id: ${{ steps.create_release.outputs.id }}
+      owner: ${{ inputs.repo_owner }}
+      repo: ${{ inputs.repo_name }}
+  - name: Post Cleanup
+    shell: bash
+    if: ${{ always() }}
+    run: rm -Rf ${{ inputs.repo_name }}
